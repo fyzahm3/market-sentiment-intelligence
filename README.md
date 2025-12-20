@@ -1,12 +1,7 @@
-# Market Sentiment Intelligence
+# Market Sentiment Intelligence Platform
 
-A learning-focused backend project that analyzes social media sentiment
-and combines it with market data to produce quantified sentiment signals.
+This project analyzes stock-related discussions from Reddit to quantify market sentiment in a structured, non-opinionated way.
 
-## Goals
-- Learn production-style backend architecture
-- Work with external APIs (Reddit, market data)
-- Apply NLP for sentiment quantification
-- Version APIs for future scalability
+V1 focuses on collecting Reddit discussions, extracting stock mentions, and producing an hourly sentiment score per stock.
 
-This project prioritizes clean design and learning over predictions or trading advice.
+V2 will combine sentiment data with real stock market APIs to provide context-aware insights (no predictions).
