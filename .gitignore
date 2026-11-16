@@ -1,9 +1,33 @@
-.Rhistory
+# OS / editor
 .DS_Store
-.env
-node_modules/
-__pycache__/
-*.pyc
+.Rhistory
 .vscode/
 .cursor/
 .cursorrules
+
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node (legacy frontend)
+node_modules/
+
+# Data and models
+data/cache/*
+!data/cache/.gitkeep
+artifacts/models/
+*.pt
+*.pkl
+*.log
