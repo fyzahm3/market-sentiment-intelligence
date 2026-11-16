@@ -1,0 +1,84 @@
+# CLAUDE.md
+
+Guidance for coding agents working in this repository.
+
+## What this project is
+
+Signal Audit Lab: a library and CLI that tests whether a news or social-media
+trading signal has a real edge, and keeps a tamper-evident forward record of
+predictions. Read [docs/PRD.md](docs/PRD.md) for what and why, and
+[docs/SPEC.md](docs/SPEC.md) for how. Target market is US equities, daily bars.
+
+It evaluates signals. It never recommends trades and is not investment advice.
+
+## Commands
+
+```bash
+make setup        # create .venv and install everything (uv)
+make check        # lint + types + tests; must pass before any commit
+make test         # pytest only
+make lint         # ruff check + format check
+make fmt          # auto-format
+make typecheck    # mypy
+make demo         # audit three signals on synthetic data
+make leak-suite   # planted-leak detection results
+```
+
+Run a single test: `uv run pytest tests/test_leakage.py -k truncation`.
+
+## Layout
+
+- `src/signal_audit/data/` — point-in-time store, market data, adapters
+- `src/signal_audit/signals/` — signal protocol, honest examples, planted leaks
+- `src/signal_audit/audit/` — backtest, metrics, baselines, leak test, report
+- `src/signal_audit/ledger/` — hash-chained forward ledger
+- `tests/` — one module per source module
+- `legacy/` — the previous trading-bot project. Frozen reference. Do not edit,
+  import from, or extend it.
+
+## Hard rules
+
+1. **Never fabricate or hand-type a result.** Every number in the README, a
+   report or a doc must come from a command in the Makefile. If a number can't
+   be reproduced, remove it.
+2. **Never fall back to a mock silently.** If an API key or dataset is missing,
+   skip that step and say so in the output. A mocked model must never be
+   reported under a real model's name.
+3. **Never swallow exceptions in analysis code.** No bare `except: pass`. A
+   failed simulation run must fail loudly or be counted and reported.
+4. **Point-in-time discipline.** Every stored record has `event_time` and
+   `knowledge_time` (tz-aware UTC). "As of" logic filters on `knowledge_time`.
+5. **Fixed execution convention.** Decide at the close of T, trade at the open
+   of T+1. Only `audit/backtest.py` turns scores into returns.
+6. **Seed all randomness.** Pass a `numpy.random.Generator`; never use the
+   global `np.random` state.
+7. **New leak class means a new planted leak.** When a leak is found that the
+   truncation test missed, add it to `signals/planted.py` with a test first.
+8. **No secrets in the repo.** Credentials come from environment variables
+   listed in `.env.example`. Never put tokens in URLs, git remotes or code.
+9. **$0 budget.** Don't add paid services or dependencies that need them.
+10. **Data access.** Official APIs first. Scraping only public pages, honouring
+    robots.txt and rate limits, never bypassing logins or bot protection. Don't
+    commit raw user-generated content; commit ticker-level aggregates.
+
+## Conventions
+
+- Python 3.11+, full type hints, `from __future__ import annotations`.
+- Score frames: index is a `DatetimeIndex` of dates, columns are tickers,
+  higher is more bullish, NaN means no opinion.
+- Pure functions in `audit/`; no I/O there. I/O lives in `data/adapters/`,
+  `ledger/` and `cli.py`.
+- Tests use synthetic data from `data/synthetic.py`; no network in tests.
+- Keep verdict thresholds in `audit/report.py` only.
+
+## Definition of done
+
+- `make check` passes.
+- New behaviour has a test that fails without the change.
+- Docs updated if a command, convention or requirement changed.
+- No new claim in any doc without a command that reproduces it.
+
+## Current status
+
+Scaffold (milestone M0). Synthetic data only; there are no real-market results
+yet. Next milestone is M1 in docs/SPEC.md.
