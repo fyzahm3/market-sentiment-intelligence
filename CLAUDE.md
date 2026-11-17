@@ -20,7 +20,7 @@ make test         # pytest only
 make lint         # ruff check + format check
 make fmt          # auto-format
 make typecheck    # mypy
-make demo         # audit three signals on synthetic data
+make demo         # audit four reference signals on synthetic data
 make leak-suite   # planted-leak detection results
 make report-momentum  # real prices via yfinance (needs network); writes reports/
 ```

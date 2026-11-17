@@ -1,4 +1,4 @@
-"""The dataset a signal is computed from: daily prices plus optional documents."""
+"""The dataset a signal is computed from: daily prices plus optional text data."""
 
 from __future__ import annotations
 
@@ -12,15 +12,22 @@ from signal_audit.sessions import session_close_utc
 
 @dataclass(frozen=True)
 class MarketData:
-    """Daily open and close prices (dates x tickers) and point-in-time documents.
+    """Daily open and close prices (dates x tickers) and point-in-time text data.
 
     ``opens`` and ``closes`` share a sorted, unique, tz-naive ``DatetimeIndex`` of
     session dates and the same ticker columns.
+
+    ``documents`` holds one row per document. ``engagement`` holds one row per
+    engagement snapshot of a post: ``event_time`` is when the post was created,
+    ``knowledge_time`` is when the snapshot was fetched, plus ``post_id`` (str)
+    and ``score`` (float). A post's engagement keeps changing after it is posted,
+    so each fetch is stored as its own row rather than overwriting the last one.
     """
 
     opens: pd.DataFrame
     closes: pd.DataFrame
     documents: PointInTimeStore | None = None
+    engagement: PointInTimeStore | None = None
 
     def __post_init__(self) -> None:
         index = self.opens.index
@@ -48,12 +55,14 @@ class MarketData:
     def truncate(self, cut: pd.Timestamp) -> MarketData:
         """Everything knowable at the close of session ``cut``.
 
-        Prices after ``cut`` are dropped, and documents are limited to those
-        with ``knowledge_time`` at or before that session's close.
+        Prices after ``cut`` are dropped, and documents and engagement
+        snapshots are limited to those with ``knowledge_time`` at or before that
+        session's close.
         """
-        documents = None
-        if self.documents is not None:
-            documents = self.documents.truncate(session_close_utc(cut))
+        close = session_close_utc(cut)
         return MarketData(
-            opens=self.opens.loc[:cut], closes=self.closes.loc[:cut], documents=documents
+            opens=self.opens.loc[:cut],
+            closes=self.closes.loc[:cut],
+            documents=None if self.documents is None else self.documents.truncate(close),
+            engagement=None if self.engagement is None else self.engagement.truncate(close),
         )

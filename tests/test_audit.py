@@ -6,7 +6,13 @@ import pytest
 from signal_audit.audit.backtest import BacktestConfig
 from signal_audit.audit.baselines import buy_and_hold, permutation_test
 from signal_audit.audit.report import Thresholds, Verdict, decide_verdict
-from signal_audit.audit.runner import CHECKS_NOT_RUN, HOLIDAYS_NOT_RUN, audit_signal
+from signal_audit.audit.runner import (
+    CHECKS_NOT_RUN,
+    ENGAGEMENT_VINTAGE_NOT_RUN,
+    HOLIDAYS_NOT_RUN,
+    audit_signal,
+    checks_not_run,
+)
 from signal_audit.data.market import MarketData
 from signal_audit.signals.examples import MentionSpikeSignal, MomentumSignal, RandomSignal
 from signal_audit.signals.planted import PeekAheadSignal
@@ -155,3 +161,22 @@ def test_holiday_caveat_only_when_documents_are_used(market: MarketData) -> None
     report = audit_signal(MomentumSignal(), prices_only, n_permutations=20)
     assert HOLIDAYS_NOT_RUN not in report.checks_not_run
     assert report.checks_not_run == CHECKS_NOT_RUN
+
+
+def test_engagement_vintage_caveat_only_when_engagement_is_used(market: MarketData) -> None:
+    assert market.engagement is not None
+    report = audit_signal(RandomSignal(), market, n_permutations=20)
+    assert ENGAGEMENT_VINTAGE_NOT_RUN in report.checks_not_run
+    assert "stamped with the posting time" in report.to_markdown()
+
+    without = MarketData(opens=market.opens, closes=market.closes, documents=market.documents)
+    assert ENGAGEMENT_VINTAGE_NOT_RUN not in checks_not_run(without)
+
+
+def test_holiday_caveat_when_only_engagement_is_used(market: MarketData) -> None:
+    data = MarketData(opens=market.opens, closes=market.closes, engagement=market.engagement)
+    assert checks_not_run(data) == [
+        *CHECKS_NOT_RUN,
+        HOLIDAYS_NOT_RUN,
+        ENGAGEMENT_VINTAGE_NOT_RUN,
+    ]

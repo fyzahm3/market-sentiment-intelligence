@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from signal_audit.data.market import MarketData
-from signal_audit.signals.base import Signal, document_counts
+from signal_audit.signals.base import Signal, document_counts, engagement_scores
 
 
 @dataclass(frozen=True)
@@ -56,5 +56,19 @@ class MentionSpikeSignal:
         return recent - usual
 
 
+@dataclass(frozen=True)
+class EngagementSignal:
+    """Summed log engagement of the posts that became known in each session.
+
+    Each post counts on the session of its first snapshot, at the latest
+    engagement value fetched by that session's close.
+    """
+
+    name: str = "engagement"
+
+    def compute(self, data: MarketData) -> pd.DataFrame:
+        return engagement_scores(data, snapshot="visible")
+
+
 def honest_signals() -> list[Signal]:
-    return [MomentumSignal(), RandomSignal(), MentionSpikeSignal()]
+    return [MomentumSignal(), RandomSignal(), MentionSpikeSignal(), EngagementSignal()]

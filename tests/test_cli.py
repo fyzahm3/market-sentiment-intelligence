@@ -13,6 +13,8 @@ from signal_audit.data.adapters.prices import PriceSource, prices_sha256
 from signal_audit.data.market import MarketData
 from signal_audit.data.synthetic import DEFAULT_TICKERS, synthetic_market
 from signal_audit.ledger import Ledger
+from signal_audit.signals.examples import honest_signals
+from signal_audit.signals.planted import planted_leaks
 
 runner = CliRunner()
 
@@ -26,8 +28,9 @@ def test_version() -> None:
 def test_leak_suite_passes() -> None:
     result = runner.invoke(app, ["leak-suite"])
     assert result.exit_code == 0, result.output
-    assert "Planted leaks caught: 5/5" in result.output
-    assert "wrongly flagged: 0/3" in result.output
+    n_leaks, n_honest = len(planted_leaks()), len(honest_signals())
+    assert f"Planted leaks caught: {n_leaks}/{n_leaks}" in result.output
+    assert f"wrongly flagged: 0/{n_honest}" in result.output
 
 
 def test_demo_writes_report_cards(tmp_path: Path) -> None:

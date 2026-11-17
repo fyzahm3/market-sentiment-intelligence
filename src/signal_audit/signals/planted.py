@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from signal_audit.data.market import MarketData
-from signal_audit.signals.base import Signal, document_counts
+from signal_audit.signals.base import Signal, document_counts, engagement_scores
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,25 @@ class EventTimeBucketSignal:
         return recent - usual
 
 
+@dataclass(frozen=True)
+class ArchivedEngagementSignal:
+    """Engagement signal that reads each post's final, archived score.
+
+    Social-media studies often take engagement (score, comment count) from
+    archives. Archives such as Arctic Shift overwrite a post's score with a
+    value fetched later, often about 36 hours after posting, and engagement
+    keeps growing in reaction to the price moves that follow. A backtest that
+    puts that value on the day of the post trades on returns it could not yet
+    have seen. Identical to ``EngagementSignal`` except for which snapshot it
+    reads.
+    """
+
+    name: str = "leak_archived_engagement"
+
+    def compute(self, data: MarketData) -> pd.DataFrame:
+        return engagement_scores(data, snapshot="final")
+
+
 def planted_leaks() -> list[Signal]:
     return [
         PeekAheadSignal(),
@@ -88,4 +107,5 @@ def planted_leaks() -> list[Signal]:
         CenteredWindowSignal(),
         BackfillSignal(),
         EventTimeBucketSignal(),
+        ArchivedEngagementSignal(),
     ]

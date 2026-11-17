@@ -118,3 +118,6 @@ site. Milestones and acceptance criteria are in
 - The leak check cannot detect a model that memorised the future, or a ticker
   universe chosen with hindsight. The momentum report lists both as checks not
   run.
+- The leak check sees engagement (post scores, comment counts) only when it is
+  stored as timestamped snapshots. An archive's final value stamped with the
+  posting time looks like ordinary data and cannot be detected.
