@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
-from signal_audit import __version__
+from signal_audit import __version__, cli
 from signal_audit.cli import app
+from signal_audit.data.adapters.prices import PriceSource, prices_sha256
+from signal_audit.data.market import MarketData
+from signal_audit.data.synthetic import DEFAULT_TICKERS, synthetic_market
 from signal_audit.ledger import Ledger
 
 runner = CliRunner()
@@ -52,3 +57,118 @@ def test_ledger_verify(tmp_path: Path) -> None:
 def test_ledger_verify_missing_file(tmp_path: Path) -> None:
     result = runner.invoke(app, ["ledger", "verify", str(tmp_path / "none.jsonl")])
     assert result.exit_code == 1
+
+
+class FakeLoader:
+    """Stands in for ``load_prices_cached``: synthetic prices, no network."""
+
+    def __init__(self, data: MarketData) -> None:
+        self.data = data
+        self.calls: list[tuple[list[str], str, str, bool]] = []
+
+    def __call__(
+        self,
+        tickers: Sequence[str],
+        start: str,
+        end: str,
+        cache_dir: Path,
+        *,
+        refresh: bool = False,
+    ) -> tuple[MarketData, PriceSource]:
+        self.calls.append((list(tickers), start, end, refresh))
+        source = PriceSource(
+            provider="fake",
+            provider_version="0.0",
+            adjusted=True,
+            downloaded_at=dt.datetime(2026, 11, 17, 12, 0, tzinfo=dt.UTC),
+            sha256=prices_sha256(self.data),
+            cache_file=cache_dir / "prices_fake.parquet",
+        )
+        return self.data, source
+
+
+def _prices_only(n_days: int = 300) -> MarketData:
+    market = synthetic_market(n_days=n_days, seed=5)
+    return MarketData(opens=market.opens, closes=market.closes)
+
+
+@pytest.fixture
+def universe_file(tmp_path: Path) -> Path:
+    path = tmp_path / "test_universe.txt"
+    path.write_text("# synthetic\n" + "\n".join(DEFAULT_TICKERS) + "\n", encoding="utf-8")
+    return path
+
+
+def _audit_args(universe: Path, *extra: str) -> list[str]:
+    return [
+        "audit",
+        "--universe",
+        str(universe),
+        "--start",
+        "2021-01-01",
+        "--end",
+        "2022-01-01",
+        "--permutations",
+        "20",
+        *extra,
+    ]
+
+
+def test_audit_writes_report_card(
+    tmp_path: Path, universe_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    loader = FakeLoader(_prices_only())
+    monkeypatch.setattr(cli, "load_prices_cached", loader)
+    out = tmp_path / "reports"
+    result = runner.invoke(
+        app, _audit_args(universe_file, "--signal", "momentum", "--out", str(out), "--refresh")
+    )
+    assert result.exit_code == 0, result.output
+    assert loader.calls == [(list(DEFAULT_TICKERS), "2021-01-01", "2022-01-01", True)]
+
+    md = out / "momentum_test_universe.md"
+    js = out / "momentum_test_universe.json"
+    assert md.exists() and js.exists()
+    markdown = md.read_text(encoding="utf-8")
+    assert "## Data" in markdown
+    assert "- Universe: test_universe: AAA, BBB" in markdown
+    assert "- Source: fake 0.0, split/dividend adjusted" in markdown
+    assert "- Non-positive prices: 0" in markdown
+    assert "Market holidays" not in markdown
+    assert "Data checks:" in result.output
+
+
+def test_audit_rejects_unknown_signal(universe_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    loader = FakeLoader(_prices_only())
+    monkeypatch.setattr(cli, "load_prices_cached", loader)
+    for name in ("nonsense", "mention_spike"):
+        result = runner.invoke(app, _audit_args(universe_file, "--signal", name))
+        assert result.exit_code == 2, result.output
+        assert "momentum, random" in result.output
+    assert loader.calls == []
+
+
+def test_audit_rejects_bad_dates(universe_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "load_prices_cached", FakeLoader(_prices_only()))
+    args = _audit_args(universe_file, "--signal", "momentum")
+    args[args.index("2022-01-01")] = "2020-01-01"
+    assert runner.invoke(app, args).exit_code == 2
+
+
+def test_audit_stops_on_sanity_failure(
+    tmp_path: Path, universe_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _prices_only()
+    closes = data.closes.copy()
+    closes.iloc[100, 2] = -1.0
+    monkeypatch.setattr(
+        cli, "load_prices_cached", FakeLoader(MarketData(opens=data.opens, closes=closes))
+    )
+    out = tmp_path / "reports"
+    result = runner.invoke(
+        app, _audit_args(universe_file, "--signal", "momentum", "--out", str(out))
+    )
+    assert result.exit_code == 1, result.output
+    assert "sanity checks failed" in result.output
+    assert "non_positive" in result.output
+    assert not out.exists()

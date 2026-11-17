@@ -1,4 +1,4 @@
-.PHONY: setup test lint fmt typecheck check demo leak-suite
+.PHONY: setup test lint fmt typecheck check demo leak-suite report-momentum
 
 setup:
 	uv sync --all-extras
@@ -24,3 +24,6 @@ demo:
 
 leak-suite:
 	uv run sigaudit leak-suite
+
+report-momentum:
+	uv run sigaudit audit --signal momentum --universe universes/us_sector_etfs.txt --start 2000-01-01 --end 2026-10-31 --top-k 3 --permutations 500 --seed 0 --n-trials 1 --out reports
