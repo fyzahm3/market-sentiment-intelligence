@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from signal_audit.audit.leakage import choose_cuts, truncation_test
 from signal_audit.audit.runner import run_leak_suite
 from signal_audit.data.market import MarketData
 from signal_audit.signals.base import Signal
-from signal_audit.signals.examples import honest_signals
-from signal_audit.signals.planted import PeekAheadSignal, planted_leaks
+from signal_audit.signals.examples import EngagementSignal, honest_signals
+from signal_audit.signals.planted import (
+    ArchivedEngagementSignal,
+    PeekAheadSignal,
+    planted_leaks,
+)
 
 
 @pytest.mark.parametrize("signal", honest_signals(), ids=lambda s: s.name)
@@ -39,6 +44,23 @@ def test_leak_suite_is_fully_correct(market: MarketData) -> None:
     rows = run_leak_suite(market)
     assert len(rows) == len(honest_signals()) + len(planted_leaks())
     assert all(row.correct for row in rows)
+
+
+def test_leak_suite_covers_engagement(market: MarketData) -> None:
+    rows = {row.signal: row for row in run_leak_suite(market)}
+    honest = rows[EngagementSignal().name]
+    leaky = rows[ArchivedEngagementSignal().name]
+    assert not honest.has_leak and not honest.flagged and honest.mismatched_cells == 0
+    assert leaky.has_leak and leaky.flagged and leaky.mismatched_cells > 0
+
+
+def test_archived_engagement_changes_scores_just_before_the_cut(market: MarketData) -> None:
+    report = truncation_test(ArchivedEngagementSignal(), market)
+    for cut in report.cuts:
+        assert not cut.passed
+        assert cut.first_mismatch is not None
+        # Final snapshots are a week old, so only the last few sessions can change.
+        assert cut.cut - cut.first_mismatch[0] <= pd.Timedelta(days=7)
 
 
 def test_choose_cuts_leaves_future_to_remove(market: MarketData) -> None:

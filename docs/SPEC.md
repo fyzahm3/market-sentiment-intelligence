@@ -32,7 +32,7 @@ src/signal_audit/
   sessions.py          session close/open times
   data/
     pit.py             PointInTimeStore
-    market.py          MarketData (prices + documents) and truncate()
+    market.py          MarketData (prices + documents + engagement) and truncate()
     synthetic.py       seeded synthetic data for demos and tests
     adapters/
       prices.py        yfinance loader
@@ -100,14 +100,18 @@ T depends only on data known by the close of T.
 ### 3.4 Truncation test (the core leak check)
 1. Compute scores on the full dataset → `S_full`.
 2. Pick cut dates. For each cut `c`, build `data.truncate(c)` (prices up to `c`,
-   documents with `knowledge_time` ≤ close of `c`) and compute → `S_c`.
+   documents and engagement snapshots with `knowledge_time` ≤ close of `c`) and
+   compute → `S_c`.
 3. Compare `S_full` and `S_c` on all dates ≤ `c`. Any difference beyond
    tolerance is a leak: the past changed when the future was removed.
 
 This catches full-sample normalisation, centred windows, negative shifts,
-back-filling and event-time bucketing. It does **not** catch a model that
-memorised the future (handled by the model-cutoff check, P1) or a universe
-chosen with hindsight (survivorship, P2). The report card lists which checks ran.
+back-filling, event-time bucketing and archived engagement. Engagement leaks
+(a post's score or comment count read at a later value than was visible at the
+decision) are caught only when engagement is stored as snapshots, each with its
+own `knowledge_time`. It does **not** catch a model that memorised the future
+(handled by the model-cutoff check, P1) or a universe chosen with hindsight
+(survivorship, P2). The report card lists which checks ran.
 
 ### 3.5 Statistics
 - **Permutation test:** shuffle the date order of the score matrix, re-run the
@@ -200,3 +204,7 @@ Thresholds live in one place (`audit/report.py`) and are printed on every report
 - Long-only top-k portfolio only.
 - Reddit client is tested against a mocked transport, not the live API.
 - No survivorship or model-memory checks yet.
+- Engagement taken from an archive that stores one final value per post, stamped
+  with the posting time, cannot be detected by the truncation test: removing
+  the future removes nothing. Engagement must be collected as timestamped
+  snapshots for the leak check to cover it.
