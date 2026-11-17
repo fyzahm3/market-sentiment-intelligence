@@ -19,8 +19,21 @@ from signal_audit.signals.planted import planted_leaks
 CHECKS_NOT_RUN = [
     "Model memory: whether an LLM behind the signal saw this period in training.",
     "Survivorship: whether the ticker universe was chosen with hindsight.",
-    "Market holidays: every weekday is treated as a trading session.",
 ]
+HOLIDAYS_NOT_RUN = "Market holidays: every weekday is treated as a trading session."
+
+
+def checks_not_run(data: MarketData) -> list[str]:
+    """Checks the report card cannot vouch for, given the data the audit ran on.
+
+    Price-only data takes its sessions from the real price index, so the
+    weekday-session assumption only matters when documents are mapped to
+    session closes.
+    """
+    items = list(CHECKS_NOT_RUN)
+    if data.documents is not None:
+        items.append(HOLIDAYS_NOT_RUN)
+    return items
 
 
 def audit_signal(
@@ -32,12 +45,18 @@ def audit_signal(
     n_permutations: int = 500,
     seed: int = 0,
     thresholds: Thresholds | None = None,
+    universe: str | None = None,
+    data_source: str | None = None,
+    data_checks: list[str] | None = None,
 ) -> AuditReport:
     """Audit ``signal`` on ``data``.
 
     ``n_trials`` is the number of variants of this signal that were tried
     before settling on this one. Reporting it honestly is what makes the
     deflated Sharpe ratio meaningful.
+
+    ``universe``, ``data_source`` and ``data_checks`` describe the data and are
+    copied onto the report card unchanged.
     """
     thresholds = thresholds or Thresholds()
     leak = truncation_test(signal, data)
@@ -97,7 +116,10 @@ def audit_signal(
         thresholds=thresholds,
         verdict=verdict,
         reasons=reasons,
-        checks_not_run=CHECKS_NOT_RUN,
+        checks_not_run=checks_not_run(data),
+        universe=universe,
+        data_source=data_source,
+        data_checks=list(data_checks or []),
     )
 
 

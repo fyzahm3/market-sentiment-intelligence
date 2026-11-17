@@ -1,0 +1,80 @@
+{
+  "signal": "momentum",
+  "start": "2000-01-03",
+  "end": "2026-10-30",
+  "n_sessions": 6748,
+  "top_k": 3,
+  "n_trials": 1,
+  "leak": {
+    "passed": true,
+    "cuts_tested": 5,
+    "mismatched_cells": 0,
+    "first_mismatch_date": null,
+    "first_mismatch_ticker": null
+  },
+  "performance_by_cost_bps": {
+    "0": {
+      "total_return": 4.84657256895898,
+      "cagr": 0.06817820905548899,
+      "annual_volatility": 0.18643883246537832,
+      "sharpe": 0.44734661041246326,
+      "sortino": 0.4202177192805564,
+      "max_drawdown": -0.6471186694381952,
+      "mean_daily_turnover": 0.31693098167086603
+    },
+    "10": {
+      "total_return": -0.3109605444010861,
+      "cagr": -0.013814920478486759,
+      "annual_volatility": 0.1864476060547103,
+      "sharpe": 0.018966037947133627,
+      "sortino": 0.01780016321014345,
+      "max_drawdown": -0.819303800565709,
+      "mean_daily_turnover": 0.31693098167086603
+    },
+    "25": {
+      "total_return": -0.9722076787408478,
+      "cagr": -0.1252565567487096,
+      "annual_volatility": 0.1868202650051032,
+      "sharpe": -0.622329374689762,
+      "sortino": -0.5858665798947829,
+      "max_drawdown": -0.9769547468296862,
+      "mean_daily_turnover": 0.31693098167086603
+    }
+  },
+  "buy_and_hold": {
+    "total_return": 9.81874886249726,
+    "cagr": 0.0930158089305253,
+    "annual_volatility": 0.18454369224969983,
+    "sharpe": 0.5745698204247444,
+    "sortino": 0.5454474931702469,
+    "max_drawdown": -0.526078462873087,
+    "mean_daily_turnover": null
+  },
+  "permutation_p_value": 0.8782435129740519,
+  "n_permutations": 500,
+  "deflated_sharpe": 0.5390756730510698,
+  "thresholds": {
+    "p_edge": 0.05,
+    "p_no_edge": 0.2,
+    "deflated_sharpe_edge": 0.95,
+    "base_cost_bps": 10.0,
+    "stress_cost_bps": 25.0
+  },
+  "verdict": "NO_EDGE",
+  "reasons": [
+    "Shuffled scores did as well or better 88% of the time (threshold 20%)."
+  ],
+  "checks_not_run": [
+    "Model memory: whether an LLM behind the signal saw this period in training.",
+    "Survivorship: whether the ticker universe was chosen with hindsight."
+  ],
+  "universe": "us_sector_etfs: XLB, XLE, XLF, XLI, XLK, XLP, XLU, XLV, XLY",
+  "data_source": "yfinance 1.8.0, split/dividend adjusted, downloaded 2026-11-17T15:41:18Z, sha256 cd06693fc60f4ba41f69a0334bcfed4f235f1486d4dd2549a5c6a9182cf56a1d",
+  "data_checks": [
+    "Sessions: 6748, tickers: 9",
+    "Non-positive prices: 0",
+    "Missing ticker-days: 0",
+    "Calendar gaps longer than 4 weekdays: 0",
+    "Split suspects: 0 (adjusted prices; no overnight move near a split ratio)"
+  ]
+}

@@ -1,0 +1,15 @@
+# The nine original Select Sector SPDR ETFs.
+# All nine began trading in December 1998, so every member existed and was
+# tradable on the first day of an audit that starts in 2000 or later. This
+# avoids the usual survivorship problem of picking today's stocks, but the
+# choice of this ETF family was still made in hindsight.
+# Excluded: XLC (launched 2018) and XLRE (launched 2015).
+XLB
+XLE
+XLF
+XLI
+XLK
+XLP
+XLU
+XLV
+XLY

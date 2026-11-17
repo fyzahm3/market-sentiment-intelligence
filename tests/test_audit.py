@@ -6,9 +6,9 @@ import pytest
 from signal_audit.audit.backtest import BacktestConfig
 from signal_audit.audit.baselines import buy_and_hold, permutation_test
 from signal_audit.audit.report import Thresholds, Verdict, decide_verdict
-from signal_audit.audit.runner import audit_signal
+from signal_audit.audit.runner import CHECKS_NOT_RUN, HOLIDAYS_NOT_RUN, audit_signal
 from signal_audit.data.market import MarketData
-from signal_audit.signals.examples import MentionSpikeSignal, RandomSignal
+from signal_audit.signals.examples import MentionSpikeSignal, MomentumSignal, RandomSignal
 from signal_audit.signals.planted import PeekAheadSignal
 
 
@@ -110,3 +110,48 @@ def test_leak_overrides_everything() -> None:
         thresholds=Thresholds(),
     )
     assert verdict is Verdict.LEAK_DETECTED
+
+
+def test_report_has_no_data_section_by_default(market: MarketData) -> None:
+    report = audit_signal(RandomSignal(), market, n_permutations=20)
+    assert report.universe is None and report.data_source is None and report.data_checks == []
+    assert "## Data" not in report.to_markdown()
+
+
+def test_report_renders_data_section_after_period(market: MarketData) -> None:
+    report = audit_signal(
+        RandomSignal(),
+        market,
+        n_permutations=20,
+        universe="test_universe: AAA, BBB",
+        data_source="fake 0.0, split/dividend adjusted, sha256 abc",
+        data_checks=["Non-positive prices: 0", "Split suspects: 0"],
+    )
+    markdown = report.to_markdown()
+    lines = markdown.splitlines()
+    period = next(i for i, line in enumerate(lines) if line.startswith("Period "))
+    assert lines[period + 2] == "## Data"
+    data_block = lines[period + 4 : period + 8]
+    assert data_block == [
+        "- Universe: test_universe: AAA, BBB",
+        "- Source: fake 0.0, split/dividend adjusted, sha256 abc",
+        "- Non-positive prices: 0",
+        "- Split suspects: 0",
+    ]
+    assert markdown.index("## Data") < markdown.index("## Leak check")
+    assert report.model_validate_json(report.model_dump_json()) == report
+
+
+def test_data_section_shown_for_checks_alone(market: MarketData) -> None:
+    report = audit_signal(RandomSignal(), market, n_permutations=20, data_checks=["Sessions: 1"])
+    assert "## Data\n\n- Sessions: 1\n" in report.to_markdown()
+
+
+def test_holiday_caveat_only_when_documents_are_used(market: MarketData) -> None:
+    with_docs = audit_signal(RandomSignal(), market, n_permutations=20)
+    assert HOLIDAYS_NOT_RUN in with_docs.checks_not_run
+
+    prices_only = MarketData(opens=market.opens, closes=market.closes)
+    report = audit_signal(MomentumSignal(), prices_only, n_permutations=20)
+    assert HOLIDAYS_NOT_RUN not in report.checks_not_run
+    assert report.checks_not_run == CHECKS_NOT_RUN

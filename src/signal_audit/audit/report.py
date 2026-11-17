@@ -53,6 +53,9 @@ class AuditReport(BaseModel):
     verdict: Verdict
     reasons: list[str]
     checks_not_run: list[str]
+    universe: str | None = None
+    data_source: str | None = None
+    data_checks: list[str] = []
 
     def to_markdown(self) -> str:
         lines = [
@@ -65,6 +68,16 @@ class AuditReport(BaseModel):
             f"Period {self.start} to {self.end} ({self.n_sessions} sessions), "
             f"long-only top {self.top_k}, {self.n_trials} variant(s) tried.",
             "",
+        ]
+        if self.universe is not None or self.data_source is not None or self.data_checks:
+            lines += ["## Data", ""]
+            if self.universe is not None:
+                lines.append(f"- Universe: {self.universe}")
+            if self.data_source is not None:
+                lines.append(f"- Source: {self.data_source}")
+            lines += [f"- {check}" for check in self.data_checks]
+            lines.append("")
+        lines += [
             "## Leak check (truncation test)",
             "",
             f"- Result: {'passed' if self.leak.passed else 'FAILED'}",
