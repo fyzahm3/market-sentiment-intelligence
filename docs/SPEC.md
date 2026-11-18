@@ -29,7 +29,7 @@ reads them. This keeps hosting at $0.
 ```
 src/signal_audit/
   config.py            settings from environment
-  sessions.py          session close/open times
+  sessions.py          NYSE calendar: sessions, holidays, early closes
   data/
     pit.py             PointInTimeStore
     market.py          MarketData (prices + documents + engagement) and truncate()
@@ -52,6 +52,7 @@ src/signal_audit/
     runner.py          audit_signal(), leak suite
   ledger/
     ledger.py          append-only hash-chained ledger
+    outcomes.py        realised outcomes, in their own hash chain
   cli.py               sigaudit entry point
 tests/                 one test module per source module
 docs/                  PRD.md, SPEC.md
@@ -59,6 +60,7 @@ data/labels/           small labelled sets (tracked)
 data/cache/            downloaded data (ignored)
 universes/             ticker universe files (tracked)
 reports/               committed report cards (Markdown and JSON)
+records/               forward ledger and outcomes, committed by the daily job
 legacy/                the previous trading-bot project, frozen
 ```
 
@@ -83,6 +85,13 @@ most common real-world leak and is one of the planted leaks.
 - Costs are `turnover × bps / 10_000`, charged when weights change.
 
 This is fixed in `audit/backtest.py`. Signals never choose their own fill price.
+
+Sessions, holidays (with their weekend-observance rules), special closures and
+13:00 early closes come from the NYSE (`XNYS`) calendar of the free
+`exchange_calendars` package, wrapped in `sessions.py`. "Close of T" is the
+true close, so a document seen at 14:00 New York on the day after Thanksgiving
+counts toward the next session. Synthetic data uses every weekday; a weekday
+that is not an NYSE session keeps regular 09:30 and 16:00 times.
 
 ### 3.3 Signal interface
 
@@ -135,13 +144,29 @@ Thresholds live in one place (`audit/report.py`) and are printed on every report
 
 ### 3.7 Forward ledger
 - JSONL, one entry per line: `seq`, `made_at`, `signal`, `as_of`, `scores`,
-  `prev_hash`, `hash`.
+  `universe`, `top_k`, `prev_hash`, `hash`.
 - `hash` = SHA-256 of the canonical JSON of the entry without `hash`.
-- An entry is on time only if `made_at` is before the open of the session after
-  `as_of`. Late entries are rejected.
+  `universe` and `top_k` were added later and are hashed only when set, so an
+  entry in the original format keeps its hash.
+- `as_of` must be an NYSE session. An entry is on time only if `made_at` is
+  before the open of the session after `as_of`. Late entries are rejected.
+- `sigaudit ledger record` uses the latest completed session as `as_of`. It is
+  idempotent per (signal, universe, `as_of`), and records nothing if the
+  price data does not yet contain that session.
 - The file is committed to git by the scheduled job, so commit history is an
   independent timestamp.
 - Outcomes are written to a separate file; predictions are never edited.
+  `sigaudit ledger score` appends one outcome per entry once its holding
+  period is over: bought at the open of the session after `as_of`, sold at the
+  next session's open. Each outcome stores `seq`, `made_at`, `entry_seq`,
+  `entry_hash`, `signal`, `universe`, `as_of`, `top_k`, `entered`,
+  `exited`, `weights`, `ticker_returns`, `gross_return`, `turnover`,
+  `cost_bps` (10), `net_return`, `price_source`, `prev_hash` and `hash`.
+  Returns come from `audit/backtest.py`; turnover is measured from the previous
+  session's ledger weights for the same signal, as in the backtest.
+- `sigaudit ledger verify` checks both chains, that every outcome names an
+  existing entry by `seq` and `hash`, that no entry is scored twice, and that
+  no outcome was written before its holding period ended.
 
 ## 4. Milestone acceptance criteria
 
@@ -162,10 +187,12 @@ Thresholds live in one place (`audit/report.py`) and are printed on every report
 - Mention-spike signal audited; report card committed.
 - Ticker extraction evaluated on a labelled sample (precision and recall reported).
 
-### M3 — Forward ledger live
+### M3 — Forward ledger live (done for price-only signals; targets: `make ledger-record`, `make ledger-score`, `make ledger-verify`)
 - `sigaudit ledger record` and `sigaudit ledger score` commands.
-- Scheduled workflow commits one entry per trading day per signal.
-- Trading-holiday calendar in place (v0 treats every weekday as a session).
+- Scheduled workflow (`.github/workflows/ledger.yml`) commits one entry per
+  trading day per signal (`momentum` and `random` on the sector ETFs) to
+  `records/`.
+- Trading-holiday calendar in place (NYSE calendar, including early closes).
 
 ### M4 — Public site
 - Static site built from `reports/` and the ledger; deployed on a free host.
@@ -199,9 +226,10 @@ Thresholds live in one place (`audit/report.py`) and are printed on every report
 
 - One real-price report exists, for a price-only signal (momentum). No
   text-based signal has been audited on real data yet.
-- Weekday-only calendar for mapping documents to sessions; market holidays are
-  not handled there. Price-only audits take sessions from the price index.
 - Long-only top-k portfolio only.
+- The forward ledger records price-only signals only. If yfinance has not
+  published a session's bar when the daily job runs, that session is skipped
+  and stays missing from the record; it cannot be added later.
 - Reddit client is tested against a mocked transport, not the live API.
 - No survivorship or model-memory checks yet.
 - Engagement taken from an archive that stores one final value per post, stamped

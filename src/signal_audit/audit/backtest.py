@@ -75,3 +75,57 @@ def run_backtest(scores: pd.DataFrame, data: MarketData, config: BacktestConfig)
         turnover=turnover.iloc[keep],
         weights=held.iloc[keep],
     )
+
+
+@dataclass(frozen=True)
+class HoldingPeriod:
+    """What one row of scores earned under the convention above.
+
+    The scores for ``decided`` are traded at the open of ``entered`` (the next
+    date in the data) and held to the open of ``exited`` (the date after that).
+    ``turnover`` is measured against the weights held during ``decided``, so it
+    matches the daily rebalancing in ``run_backtest``.
+    """
+
+    decided: pd.Timestamp
+    entered: pd.Timestamp
+    exited: pd.Timestamp
+    weights: pd.Series  # non-zero weights held from entered to exited
+    ticker_returns: pd.Series  # open-to-open return of each held ticker; NaN if unknown
+    gross_return: float
+    turnover: float
+    net_return: float  # gross_return less turnover at config.cost_bps
+
+
+def holding_periods(
+    scores: pd.DataFrame, data: MarketData, config: BacktestConfig
+) -> dict[pd.Timestamp, HoldingPeriod]:
+    """One ``HoldingPeriod`` per score row whose holding period lies inside ``data``.
+
+    Rows dated outside ``data``, rows with no score at all, and the last two
+    dates of ``data`` (whose exit open is not in it) are left out. Every number
+    comes from ``run_backtest`` on the full score frame.
+    """
+    result = run_backtest(scores, data, config)
+    forward = open_to_open_returns(data)
+    dates = data.dates
+    periods: dict[pd.Timestamp, HoldingPeriod] = {}
+    for decided in align_scores(scores, data).dropna(how="all").index:
+        pos = dates.get_loc(decided)
+        assert isinstance(pos, int)
+        if pos + 2 >= len(dates):
+            continue
+        entered, exited = dates[pos + 1], dates[pos + 2]
+        row = result.weights.iloc[pos + 1]
+        held = row[row.to_numpy() != 0.0]
+        periods[decided] = HoldingPeriod(
+            decided=decided,
+            entered=entered,
+            exited=exited,
+            weights=held,
+            ticker_returns=forward.iloc[pos + 1].reindex(held.index),
+            gross_return=float(result.gross_returns.loc[entered]),
+            turnover=float(result.turnover.loc[entered]),
+            net_return=float(result.returns.loc[entered]),
+        )
+    return periods

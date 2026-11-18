@@ -9,6 +9,7 @@ from signal_audit.data.adapters.prices import frame_to_market
 from signal_audit.data.adapters.reddit import (
     API_BASE,
     TOKEN_URL,
+    RedditAPIError,
     RedditClient,
     extract_tickers,
     posts_to_frame,
@@ -115,3 +116,146 @@ def test_frame_to_market_splits_fields() -> None:
 def test_frame_to_market_reports_missing_tickers() -> None:
     with pytest.raises(ValueError, match="no price data returned"):
         frame_to_market(_download(["AAPL"]), ["AAPL", "TSLA"])
+
+
+class _Clock:
+    """A fake clock whose sleeper advances time instead of waiting."""
+
+    def __init__(self) -> None:
+        self.now = 1_000.0
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class _Server:
+    """Counts token and data requests; ``script`` holds forced data responses."""
+
+    def __init__(self, script: list[httpx.Response] | None = None, expires_in: int = 3600) -> None:
+        self.tokens = 0
+        self.expires_in = expires_in
+        self.script = list(script or [])
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if str(request.url) == TOKEN_URL:
+            assert request.content == b"grant_type=client_credentials"
+            self.tokens += 1
+            return httpx.Response(
+                200, json={"access_token": f"tok-{self.tokens}", "expires_in": self.expires_in}
+            )
+        self.requests.append(request)
+        if self.script:
+            return self.script.pop(0)
+        return httpx.Response(200, json={"data": {"children": []}})
+
+
+def _client(server: _Server, clock: _Clock, **kwargs: float) -> RedditClient:
+    return RedditClient(
+        "id",
+        "secret",
+        "test-agent",
+        transport=httpx.MockTransport(server),
+        clock=clock,
+        sleeper=clock.sleep,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_token_is_fetched_once_and_reused() -> None:
+    server, clock = _Server(), _Clock()
+    client = _client(server, clock)
+    client.fetch_new("stocks")
+    client.fetch_new("stocks")
+    assert server.tokens == 1
+    assert {r.headers["authorization"] for r in server.requests} == {"Bearer tok-1"}
+
+
+def test_token_is_refreshed_shortly_before_expiry() -> None:
+    server, clock = _Server(expires_in=600), _Clock()
+    client = _client(server, clock)
+    client.fetch_new("stocks")
+    clock.now += 500  # still more than the 60 s margin left
+    client.fetch_new("stocks")
+    assert server.tokens == 1
+    clock.now += 50  # now inside the margin
+    client.fetch_new("stocks")
+    assert server.tokens == 2
+
+
+def test_401_reauthenticates_once() -> None:
+    ok = httpx.Response(200, json={"data": {"children": []}})
+    server, clock = _Server([httpx.Response(401), ok]), _Clock()
+    client = _client(server, clock)
+    assert client.fetch_new("stocks") == []
+    assert server.tokens == 2
+    assert server.requests[-1].headers["authorization"] == "Bearer tok-2"
+
+
+def test_repeated_401_raises() -> None:
+    server, clock = _Server([httpx.Response(401), httpx.Response(401)]), _Clock()
+    with pytest.raises(httpx.HTTPStatusError):
+        _client(server, clock).fetch_new("stocks")
+    assert server.tokens == 2
+
+
+def test_429_backs_off_then_succeeds() -> None:
+    ok = httpx.Response(200, json={"data": {"children": []}})
+    limited = httpx.Response(429, headers={"Retry-After": "10"})
+    server, clock = _Server([limited, httpx.Response(503), ok]), _Clock()
+    assert _client(server, clock, backoff_seconds=2.0).fetch_new("stocks") == []
+    assert clock.sleeps == [10.0, 4.0]
+
+
+def test_retries_are_bounded() -> None:
+    server, clock = _Server([httpx.Response(500)] * 10), _Clock()
+    client = _client(server, clock, max_retries=2)
+    with pytest.raises(RedditAPIError):
+        client.fetch_new("stocks")
+    assert len(server.requests) == 3
+
+
+def test_fetch_info_batches_at_100() -> None:
+    def info(request: httpx.Request) -> httpx.Response:
+        ids = request.url.params["id"].split(",")
+        children = [{"data": {"id": name[3:]}} for name in ids]
+        return httpx.Response(200, json={"data": {"children": children}})
+
+    clock = _Clock()
+    server = _Server()
+    inner = httpx.MockTransport(lambda r: info(r) if r.url.path == "/api/info" else server(r))
+    client = RedditClient("id", "secret", "ua", transport=inner, clock=clock, sleeper=clock.sleep)
+    posts = client.fetch_info([f"p{i}" for i in range(250)])
+    assert [p["id"] for p in posts] == [f"p{i}" for i in range(250)]
+    assert client.api_calls == 3
+
+
+def test_ratelimit_headers_pause_until_reset() -> None:
+    empty = {"data": {"children": []}}
+    drained = httpx.Response(
+        200, json=empty, headers={"X-Ratelimit-Remaining": "0", "X-Ratelimit-Reset": "30"}
+    )
+    server, clock = _Server([drained, httpx.Response(200, json=empty)]), _Clock()
+    client = _client(server, clock)
+    client.fetch_new("stocks")
+    assert clock.sleeps == []
+    client.fetch_new("stocks")
+    assert clock.sleeps == [30.0]
+
+
+def test_client_never_exceeds_requests_per_minute() -> None:
+    server, clock = _Server(), _Clock()
+    client = _client(server, clock, max_per_minute=5)
+    started: list[float] = []
+    for _ in range(12):
+        client.fetch_new("stocks")
+        started.append(clock.now)
+    for i, when in enumerate(started):
+        in_window = [t for t in started[: i + 1] if when - t < 60.0]
+        assert len(in_window) <= 5
+    assert clock.sleeps  # it really had to wait
