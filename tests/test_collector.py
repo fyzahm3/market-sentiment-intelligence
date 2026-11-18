@@ -364,3 +364,27 @@ def test_collect_from_settings_runs_with_credentials(reddit: FakeReddit, tmp_pat
     assert len(load_snapshots(tmp_path / "reddit")) == 1
     state = json.loads((tmp_path / "reddit" / "state.json").read_text())
     assert list(state["posts"]) == ["a1"]
+
+
+def test_discovery_uses_the_schedule_given_to_run_once(reddit: FakeReddit, tmp_path: Path) -> None:
+    # Created 15:00 New York; discovered two hours later, after the close.
+    reddit.add("a1", FRIDAY)
+    schedule = SnapshotSchedule(fixed_hours=(("4h", 4.0),))
+    client = RedditClient(
+        "id", "secret", "ua", transport=httpx.MockTransport(reddit), sleeper=lambda _s: None
+    )
+    try:
+        run_once(
+            client,
+            tmp_path / "state.json",
+            tmp_path,
+            ("stocks",),
+            UNIVERSE,
+            FRIDAY + pd.Timedelta(hours=2),
+            schedule=schedule,
+        )
+    finally:
+        client.close()
+    # Custom targets: discovery, close, 4h. Discovery and close have passed.
+    # The default schedule would also count its 1h target and give 3.
+    assert CollectorState.load(tmp_path / "state.json").posts["a1"].next_index == 2

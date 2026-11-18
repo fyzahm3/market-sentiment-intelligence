@@ -285,6 +285,7 @@ def _discover(
     run_id: str,
     max_pages: int,
     rows: list[dict[str, Any]],
+    schedule: SnapshotSchedule,
 ) -> int:
     watermark = state.watermarks.get(subreddit)
     seen = set(state.recent_ids.get(subreddit, []))
@@ -315,7 +316,7 @@ def _discover(
             if not tickers:
                 continue
             tracked = TrackedPost(subreddit, created_utc, tickers, 0)
-            advanced = SnapshotSchedule().advance(tracked.created, 0, fetched_at)
+            advanced = schedule.advance(tracked.created, 0, fetched_at)
             tracked.next_index = advanced[0] if advanced else 0
             rows.extend(_rows(post_id, tracked, post, fetched_at, "discovery", run_id))
             state.posts[post_id] = tracked
@@ -364,7 +365,9 @@ def run_once(
 
     discovered = 0
     for subreddit in subreddits:
-        discovered += _discover(client, state, subreddit, allowed, stamp, run_id, max_pages, rows)
+        discovered += _discover(
+            client, state, subreddit, allowed, stamp, run_id, max_pages, rows, schedule
+        )
 
     due: dict[str, tuple[int, str]] = {}
     for post_id in previously_tracked:
