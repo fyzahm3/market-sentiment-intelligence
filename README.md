@@ -3,9 +3,11 @@
 Tests whether a news or social-media trading signal has a real edge, and keeps a
 tamper-evident forward record of predictions.
 
-> **Status: M1, first real-price audit.** The engine now audits price-only
-> signals on real US sector ETF prices. Text-based signals have not been audited
-> on real data yet. Nothing here is investment advice.
+> **Status: M3, forward ledger live for price-only signals.** The engine audits
+> price-only signals on real US sector ETF prices, and a daily job records their
+> predictions before the next open. Text-based signals have not been audited on
+> real data yet (M2 waits on Reddit API access). Nothing here is investment
+> advice.
 
 ## Why
 
@@ -29,8 +31,12 @@ comparison with existing tools.
   downloaded from yfinance. Price sanity checks run first: non-positive prices
   and suspected unadjusted splits stop the audit; missing ticker-days and long
   calendar gaps are reported.
+- **NYSE calendar.** Sessions, holidays, special closures and 13:00 early
+  closes come from the NYSE calendar, so "close of T" is the true close.
 - **Forward ledger.** Append-only, hash-chained log that rejects predictions
-  made after the outcome window opens.
+  made after the outcome window opens. `sigaudit ledger record` adds the
+  latest session's prediction; `sigaudit ledger score` appends the realised
+  return of each finished prediction to a separate hash-chained outcomes file.
 
 ## Quickstart
 
@@ -76,6 +82,37 @@ uv run sigaudit audit --signal momentum --universe universes/us_sector_etfs.txt 
 using the cache. The cache is fingerprinted with SHA-256, the fingerprint is
 printed on the report card, and a tampered cache fails loudly.
 
+## Live ledger
+
+A scheduled GitHub Actions job (`.github/workflows/ledger.yml`) runs on
+weekdays at 21:30 UTC, after the New York close. It:
+
+1. records the scores of `momentum` and `random` on
+   `universes/us_sector_etfs.txt` for the session that just closed, using
+   freshly downloaded yfinance prices (top 3, long-only);
+2. scores every prediction whose holding period has ended: bought at the open
+   of the next session, sold at the open of the session after that, before
+   costs and at 10 bps;
+3. verifies both files and commits them.
+
+Predictions are in `records/ledger.jsonl` and outcomes in
+`records/outcomes.jsonl`; the job creates both on its first run. Each line carries the
+hash of the line before it, each outcome names the prediction it scores by
+hash, and the git history timestamps every commit. A prediction made after the
+next open is refused. On a holiday there is no new session, so nothing is
+committed. `random` is there as a control: it should not beat chance.
+
+Anyone can check that nothing has been edited, removed or back-dated:
+
+```bash
+make setup
+uv run sigaudit ledger verify
+```
+
+The same steps run locally with `make ledger-record`, `make ledger-score` and
+`make ledger-verify` (network access needed for the first two). The record is
+too short to say anything yet; no performance figures are quoted here.
+
 ## First real result
 
 The first real-price report is
@@ -96,6 +133,7 @@ tests/              test suite (no network)
 docs/               PRD.md (what and why), SPEC.md (how)
 universes/          ticker universe files, one per line
 reports/            committed report cards (Markdown and JSON)
+records/            forward ledger and outcomes, committed by the daily job
 data/labels/        small labelled datasets
 data/cache/         downloaded prices (gitignored)
 legacy/             the earlier trading-bot version of this project, kept for reference
@@ -103,17 +141,16 @@ legacy/             the earlier trading-bot version of this project, kept for re
 
 ## Roadmap
 
-Real prices (done), then Reddit data, then the live forward ledger and a public
-site. Milestones and acceptance criteria are in
+Real prices (done), the live forward ledger for price-only signals (done),
+then Reddit data and a public site. Milestones and acceptance criteria are in
 [docs/SPEC.md](docs/SPEC.md).
 
 ## Limitations
 
 - Only one real-price report exists, for a price-only signal. No text-based
   signal has been audited on real data yet.
-- Market holidays are handled for price-only data, because sessions come from
-  the real price index. The weekday-only calendar still applies when documents
-  are used.
+- The forward ledger covers price-only signals only. A session whose prices are
+  not available when the daily job runs is skipped and cannot be added later.
 - Long-only, top-k portfolios only.
 - The leak check cannot detect a model that memorised the future, or a ticker
   universe chosen with hindsight. The momentum report lists both as checks not

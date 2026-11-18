@@ -157,7 +157,7 @@ Priority: **P0** = v1 must-have, **P1** = v1 should-have, **P2** = later.
 ### 6.5 Surface
 | ID | Requirement | Pri |
 |---|---|---|
-| U1 | CLI: `demo`, `leak-suite`, `audit`, `ledger verify` | P0 |
+| U1 | CLI: `demo`, `leak-suite`, `audit`, `ledger record`, `ledger score`, `ledger verify` | P0 |
 | U2 | Static public site: leaderboard, per-signal report cards, ledger | P1 |
 | U3 | Hosted "upload a CSV, get a report card" | P2 |
 
