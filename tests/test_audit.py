@@ -9,7 +9,6 @@ from signal_audit.audit.report import Thresholds, Verdict, decide_verdict
 from signal_audit.audit.runner import (
     CHECKS_NOT_RUN,
     ENGAGEMENT_VINTAGE_NOT_RUN,
-    HOLIDAYS_NOT_RUN,
     audit_signal,
     checks_not_run,
 )
@@ -153,14 +152,11 @@ def test_data_section_shown_for_checks_alone(market: MarketData) -> None:
     assert "## Data\n\n- Sessions: 1\n" in report.to_markdown()
 
 
-def test_holiday_caveat_only_when_documents_are_used(market: MarketData) -> None:
-    with_docs = audit_signal(RandomSignal(), market, n_permutations=20)
-    assert HOLIDAYS_NOT_RUN in with_docs.checks_not_run
-
+def test_price_only_audit_lists_only_the_standing_caveats(market: MarketData) -> None:
     prices_only = MarketData(opens=market.opens, closes=market.closes)
     report = audit_signal(MomentumSignal(), prices_only, n_permutations=20)
-    assert HOLIDAYS_NOT_RUN not in report.checks_not_run
     assert report.checks_not_run == CHECKS_NOT_RUN
+    assert "Market holidays" not in report.to_markdown()
 
 
 def test_engagement_vintage_caveat_only_when_engagement_is_used(market: MarketData) -> None:
@@ -173,10 +169,8 @@ def test_engagement_vintage_caveat_only_when_engagement_is_used(market: MarketDa
     assert ENGAGEMENT_VINTAGE_NOT_RUN not in checks_not_run(without)
 
 
-def test_holiday_caveat_when_only_engagement_is_used(market: MarketData) -> None:
+def test_caveats_when_only_engagement_is_used(market: MarketData) -> None:
     data = MarketData(opens=market.opens, closes=market.closes, engagement=market.engagement)
-    assert checks_not_run(data) == [
-        *CHECKS_NOT_RUN,
-        HOLIDAYS_NOT_RUN,
-        ENGAGEMENT_VINTAGE_NOT_RUN,
-    ]
+    assert checks_not_run(data) == [*CHECKS_NOT_RUN, ENGAGEMENT_VINTAGE_NOT_RUN]
+    documents_only = MarketData(opens=market.opens, closes=market.closes, documents=market.documents)
+    assert checks_not_run(documents_only) == CHECKS_NOT_RUN

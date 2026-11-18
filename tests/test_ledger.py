@@ -42,7 +42,13 @@ def test_empty_ledger_verifies(tmp_path: Path) -> None:
 def test_deadline_is_next_session_open() -> None:
     assert prediction_deadline(AS_OF) == dt.datetime(2024, 1, 9, 14, 30, tzinfo=UTC)
     # A Friday prediction stays open until Monday's open.
-    assert prediction_deadline(dt.date(2024, 1, 12)) == dt.datetime(2024, 1, 15, 14, 30, tzinfo=UTC)
+    assert prediction_deadline(dt.date(2024, 1, 5)) == dt.datetime(2024, 1, 8, 14, 30, tzinfo=UTC)
+    # Monday 2024-01-15 is Martin Luther King Jr. Day, so Friday's window runs to Tuesday.
+    assert prediction_deadline(dt.date(2024, 1, 12)) == dt.datetime(2024, 1, 16, 14, 30, tzinfo=UTC)
+    # Thanksgiving: Wednesday's window runs to Friday's open.
+    assert prediction_deadline(dt.date(2024, 11, 27)) == dt.datetime(
+        2024, 11, 29, 14, 30, tzinfo=UTC
+    )
 
 
 def test_rejects_late_prediction(tmp_path: Path) -> None:

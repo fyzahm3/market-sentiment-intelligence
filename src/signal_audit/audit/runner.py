@@ -20,7 +20,6 @@ CHECKS_NOT_RUN = [
     "Model memory: whether an LLM behind the signal saw this period in training.",
     "Survivorship: whether the ticker universe was chosen with hindsight.",
 ]
-HOLIDAYS_NOT_RUN = "Market holidays: every weekday is treated as a trading session."
 ENGAGEMENT_VINTAGE_NOT_RUN = (
     "Engagement vintage: the leak check sees engagement changes only when they are "
     "stored as separate snapshots. Values recorded later but stamped with the posting "
@@ -29,15 +28,8 @@ ENGAGEMENT_VINTAGE_NOT_RUN = (
 
 
 def checks_not_run(data: MarketData) -> list[str]:
-    """Checks the report card cannot vouch for, given the data the audit ran on.
-
-    Price-only data takes its sessions from the real price index, so the
-    weekday-session assumption only matters when documents or engagement are
-    mapped to session closes.
-    """
+    """Checks the report card cannot vouch for, given the data the audit ran on."""
     items = list(CHECKS_NOT_RUN)
-    if data.documents is not None or data.engagement is not None:
-        items.append(HOLIDAYS_NOT_RUN)
     if data.engagement is not None:
         items.append(ENGAGEMENT_VINTAGE_NOT_RUN)
     return items
