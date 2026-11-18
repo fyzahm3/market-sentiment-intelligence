@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 from signal_audit import __version__, cli
 from signal_audit.audit.backtest import BacktestConfig, run_backtest
 from signal_audit.cli import app
+from signal_audit.config import get_settings
 from signal_audit.data.adapters.prices import PriceSource, prices_sha256
 from signal_audit.data.market import MarketData
 from signal_audit.data.synthetic import DEFAULT_TICKERS, synthetic_market
@@ -458,3 +459,21 @@ def test_ledger_verify_checks_outcomes(
     assert "Outcome verification failed" in tampered.output
     # Scoring refuses to extend a tampered outcomes file.
     assert runner.invoke(app, _score(ledger, outcomes)).exit_code == 1
+
+
+def test_collect_reddit_skips_without_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SIGAUDIT_REDDIT_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SIGAUDIT_REDDIT_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("SIGAUDIT_DATA_DIR", str(tmp_path / "data"))
+    get_settings.cache_clear()
+    universe = tmp_path / "u.txt"
+    universe.write_text("AAPL\n")
+    try:
+        result = CliRunner().invoke(app, ["collect", "reddit", "--universe", str(universe)])
+    finally:
+        get_settings.cache_clear()
+    assert result.exit_code == 0
+    assert "skipped: SIGAUDIT_REDDIT_CLIENT_ID/SECRET not set" in result.output
+    assert not (tmp_path / "data").exists()

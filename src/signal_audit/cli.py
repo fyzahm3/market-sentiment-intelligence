@@ -17,6 +17,7 @@ from signal_audit.audit.report import AuditReport, Verdict
 from signal_audit.audit.runner import audit_signal, run_leak_suite
 from signal_audit.config import get_settings
 from signal_audit.data.adapters.prices import PriceCacheError, PriceSource, load_prices_cached
+from signal_audit.data.collector import collect_from_settings
 from signal_audit.data.market import MarketData
 from signal_audit.data.sanity import FAILING_KINDS, check_prices
 from signal_audit.data.synthetic import synthetic_market
@@ -41,6 +42,8 @@ app = typer.Typer(
 )
 ledger_app = typer.Typer(no_args_is_help=True, help="Record, score and verify the forward ledger.")
 app.add_typer(ledger_app, name="ledger")
+collect_app = typer.Typer(no_args_is_help=True, help="Collect point-in-time social data.")
+app.add_typer(collect_app, name="collect")
 
 console = Console()
 
@@ -526,6 +529,31 @@ def ledger_verify(
         console.print(f"[bold red]Outcome verification failed:[/bold red] {error}")
         raise typer.Exit(code=1) from error
     console.print(f"[green]Outcomes intact:[/green] {scored} outcomes verified.")
+
+
+@collect_app.command("reddit")
+def collect_reddit(
+    universe: Annotated[
+        Path,
+        typer.Option(
+            exists=True, dir_okay=False, help="Tickers to tag: one per line, # comments allowed."
+        ),
+    ],
+) -> None:
+    """Discover new posts and re-snapshot tracked ones through the official Reddit API.
+
+    Stores post ids, timestamps, engagement counts and tickers only, never text.
+    Without credentials it skips and says so.
+    """
+    try:
+        tickers = load_universe(universe)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--universe") from exc
+    summary = collect_from_settings(get_settings(), tickers)
+    if summary.skipped:
+        console.print(f"[yellow]{summary.describe()}[/yellow]")
+        return
+    console.print(summary.describe())
 
 
 if __name__ == "__main__":

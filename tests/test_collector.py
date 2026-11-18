@@ -107,12 +107,17 @@ def _run(
 
 def test_session_close_for_weekday_and_weekend_posts() -> None:
     friday_close = pd.Timestamp("2024-01-12 21:00", tz="UTC")
-    monday_close = pd.Timestamp("2024-01-15 21:00", tz="UTC")
+    # Monday 2024-01-15 is Martin Luther King Jr. Day, an NYSE holiday, so the
+    # next session after Friday is Tuesday.
+    tuesday_close = pd.Timestamp("2024-01-16 21:00", tz="UTC")
     assert SnapshotSchedule.session_close(FRIDAY) == friday_close
-    # After the Friday close, and all weekend, the post belongs to Monday's session.
-    assert SnapshotSchedule.session_close(FRIDAY + pd.Timedelta(hours=2)) == monday_close
+    # After the Friday close, and all weekend, the post belongs to Tuesday's session.
+    assert SnapshotSchedule.session_close(FRIDAY + pd.Timedelta(hours=2)) == tuesday_close
     saturday = pd.Timestamp("2024-01-13 15:00", tz="UTC")
-    assert SnapshotSchedule.session_close(saturday) == monday_close
+    assert SnapshotSchedule.session_close(saturday) == tuesday_close
+    # An ordinary weekend: Saturday 2024-01-20 belongs to Monday 2024-01-22.
+    later = pd.Timestamp("2024-01-20 15:00", tz="UTC")
+    assert SnapshotSchedule.session_close(later) == pd.Timestamp("2024-01-22 21:00", tz="UTC")
 
 
 def test_targets_are_sorted_and_include_the_session_close() -> None:
