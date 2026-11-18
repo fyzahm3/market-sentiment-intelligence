@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     reddit_client_id: str | None = None
     reddit_client_secret: SecretStr | None = None
     reddit_user_agent: str = "signal-audit-lab/0.1 (research; non-commercial)"
+    # Environment values are JSON lists, e.g. SIGAUDIT_REDDIT_SUBREDDITS='["stocks"]'.
+    reddit_subreddits: list[str] = ["wallstreetbets", "stocks", "investing"]
+    # Pages of 100 posts fetched per subreddit per collector run, at most.
+    reddit_discovery_pages: int = 3
 
 
 @lru_cache
