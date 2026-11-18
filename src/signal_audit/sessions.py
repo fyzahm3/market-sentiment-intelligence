@@ -161,7 +161,9 @@ def previous_session(day: dt.date | pd.Timestamp) -> dt.date:
     return sessions[pos].date()
 
 
-def sessions_between(start: dt.date | pd.Timestamp, end: dt.date | pd.Timestamp) -> pd.DatetimeIndex:
+def sessions_between(
+    start: dt.date | pd.Timestamp, end: dt.date | pd.Timestamp
+) -> pd.DatetimeIndex:
     """NYSE sessions from ``start`` to ``end``, both inclusive, as tz-naive dates."""
     first, last = pd.Timestamp(_date(start)), pd.Timestamp(_date(end))
     sessions = _calendar().sessions

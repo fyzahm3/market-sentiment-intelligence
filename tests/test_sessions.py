@@ -156,9 +156,7 @@ def test_last_completed_session() -> None:
     assert last_completed_session(dt.datetime(2024, 1, 8, 20, 59, tzinfo=UTC)) == dt.date(
         2024, 1, 5
     )
-    assert last_completed_session(dt.datetime(2024, 1, 8, 21, 0, tzinfo=UTC)) == dt.date(
-        2024, 1, 8
-    )
+    assert last_completed_session(dt.datetime(2024, 1, 8, 21, 0, tzinfo=UTC)) == dt.date(2024, 1, 8)
     # Thanksgiving day: Wednesday was the last session.
     assert last_completed_session(dt.datetime(2024, 11, 28, 22, 0, tzinfo=UTC)) == dt.date(
         2024, 11, 27

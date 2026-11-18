@@ -172,5 +172,7 @@ def test_engagement_vintage_caveat_only_when_engagement_is_used(market: MarketDa
 def test_caveats_when_only_engagement_is_used(market: MarketData) -> None:
     data = MarketData(opens=market.opens, closes=market.closes, engagement=market.engagement)
     assert checks_not_run(data) == [*CHECKS_NOT_RUN, ENGAGEMENT_VINTAGE_NOT_RUN]
-    documents_only = MarketData(opens=market.opens, closes=market.closes, documents=market.documents)
+    documents_only = MarketData(
+        opens=market.opens, closes=market.closes, documents=market.documents
+    )
     assert checks_not_run(documents_only) == CHECKS_NOT_RUN

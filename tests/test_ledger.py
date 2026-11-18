@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 
@@ -109,6 +110,78 @@ def test_detects_backdated_entry(tmp_path: Path) -> None:
     _rewrite(path, 1, made_at="2024-01-08T23:00:00Z")
     with pytest.raises(LedgerError, match="do not match its hash"):
         ledger.verify()
+
+
+def test_universe_and_top_k_are_stored_and_hashed(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.jsonl"
+    ledger = Ledger(path)
+    entry = ledger.append(
+        "momentum", AS_OF, {"AAA": 0.5}, made_at=AFTER_CLOSE, universe="etfs", top_k=3
+    )
+    assert (entry.universe, entry.top_k) == ("etfs", 3)
+    assert ledger.find("momentum", "etfs", AS_OF) == entry
+    assert ledger.find("momentum", None, AS_OF) is None
+    assert ledger.find("random", "etfs", AS_OF) is None
+    assert ledger.verify() == 1
+
+    _rewrite(path, 0, universe="other")
+    with pytest.raises(LedgerError, match="do not match its hash"):
+        ledger.verify()
+    _rewrite(path, 0, universe="etfs", top_k=5)
+    with pytest.raises(LedgerError, match="do not match its hash"):
+        ledger.verify()
+
+
+def test_entries_in_the_original_format_still_verify(tmp_path: Path) -> None:
+    # Lines written before universe and top_k existed have neither key.
+    path = tmp_path / "ledger.jsonl"
+    _filled(path)
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        del record["universe"], record["top_k"]
+        lines.append(json.dumps(record))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    ledger = Ledger(path)
+    assert ledger.verify() == 2
+    first = ledger.entries()[0]
+    assert first.universe is None
+    # The hash is the one the original format computed.
+    original = {
+        "seq": 0,
+        "made_at": "2024-01-08T22:00:00+00:00",
+        "signal": "momentum",
+        "as_of": "2024-01-08",
+        "scores": {"AAA": "0.5", "BBB": "-0.1"},
+        "prev_hash": GENESIS_HASH,
+    }
+    canonical = json.dumps(original, sort_keys=True, separators=(",", ":"))
+    assert first.hash == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    # A newer-format entry can follow them.
+    ledger.append(
+        "momentum",
+        dt.date(2024, 1, 10),
+        {"AAA": 0.3},
+        made_at=dt.datetime(2024, 1, 10, 22, 0, tzinfo=UTC),
+        universe="etfs",
+        top_k=3,
+    )
+    assert ledger.verify() == 3
+
+
+def test_rejects_non_session_as_of(tmp_path: Path) -> None:
+    ledger = Ledger(tmp_path / "ledger.jsonl")
+    # 2024-01-15 is Martin Luther King Jr. Day.
+    with pytest.raises(LedgerError, match="not an NYSE session"):
+        ledger.append(
+            "momentum",
+            dt.date(2024, 1, 15),
+            {"AAA": 0.5},
+            made_at=dt.datetime(2024, 1, 15, 22, 0, tzinfo=UTC),
+        )
+    with pytest.raises(LedgerError, match="top_k"):
+        ledger.append("momentum", AS_OF, {"AAA": 0.5}, made_at=AFTER_CLOSE, top_k=0)
 
 
 def test_refuses_to_append_to_a_broken_ledger(tmp_path: Path) -> None:

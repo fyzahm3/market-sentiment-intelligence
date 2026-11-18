@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     )
 
     data_dir: Path = Path("data/cache")
-    ledger_path: Path = Path("ledger/predictions.jsonl")
+    ledger_path: Path = Path("records/ledger.jsonl")
+    outcomes_path: Path = Path("records/outcomes.jsonl")
 
     reddit_client_id: str | None = None
     reddit_client_secret: SecretStr | None = None
