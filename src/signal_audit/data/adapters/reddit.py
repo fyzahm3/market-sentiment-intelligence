@@ -5,13 +5,16 @@ metadata is kept; titles, bodies and author names are read for ticker tagging
 and then discarded.
 
 Status: exercised against a mocked transport only. Not yet run against the
-live API.
+live API. Only the official API is used, within the free limit of 100 queries
+per minute.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import time
+from collections import deque
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -36,7 +39,36 @@ def extract_tickers(text: str, universe: Iterable[str]) -> set[str]:
     return found & allowed
 
 
+class RedditAPIError(RuntimeError):
+    """Reddit kept failing after the bounded retries were used up."""
+
+
+def _float_header(response: httpx.Response, name: str) -> float | None:
+    raw = response.headers.get(name)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _fullname(identifier: str) -> str:
+    return identifier if identifier.startswith("t3_") else f"t3_{identifier}"
+
+
 class RedditClient:
+    """Application-only OAuth client for the two read endpoints the collector needs.
+
+    Rate limiting: a sliding window never lets more than ``max_per_minute``
+    requests start in any 60 seconds (Reddit's free limit is 100), and the
+    ``X-Ratelimit-*`` headers are honoured: when ``Remaining`` hits zero the
+    client sleeps until ``Reset``. HTTP 429, 5xx and transport errors are
+    retried with deterministic exponential backoff, at most ``max_retries``
+    times, and then raised. ``clock`` (epoch seconds) and ``sleeper`` are
+    injectable so tests never wait.
+    """
+
     def __init__(
         self,
         client_id: str,
@@ -45,35 +77,141 @@ class RedditClient:
         *,
         transport: httpx.BaseTransport | None = None,
         timeout: float = 20.0,
+        clock: Callable[[], float] = time.time,
+        sleeper: Callable[[float], None] = time.sleep,
+        max_per_minute: int = 90,
+        max_retries: int = 4,
+        backoff_seconds: float = 2.0,
+        token_margin_seconds: float = 60.0,
     ) -> None:
+        if not 1 <= max_per_minute <= 100:
+            raise ValueError("max_per_minute must be between 1 and 100")
         self._auth = (client_id, client_secret)
         self._http = httpx.Client(
             headers={"User-Agent": user_agent}, transport=transport, timeout=timeout
         )
+        self._clock = clock
+        self._sleep = sleeper
+        self._max_per_minute = max_per_minute
+        self._max_retries = max_retries
+        self._backoff = backoff_seconds
+        self._margin = token_margin_seconds
         self._token: str | None = None
+        self._token_expiry = 0.0
+        self._window: deque[float] = deque()
+        self._remaining: float | None = None
+        self._reset_at = 0.0
+        self.api_calls = 0
+        self.token_requests = 0
 
     def close(self) -> None:
         self._http.close()
 
     def _access_token(self) -> str:
-        if self._token is None:
+        if self._token is None or self._clock() >= self._token_expiry - self._margin:
+            self.token_requests += 1
             response = self._http.post(
                 TOKEN_URL, auth=self._auth, data={"grant_type": "client_credentials"}
             )
             response.raise_for_status()
-            self._token = str(response.json()["access_token"])
+            body = response.json()
+            self._token = str(body["access_token"])
+            self._token_expiry = self._clock() + float(body.get("expires_in", 3600))
         return self._token
 
-    def fetch_new(self, subreddit: str, limit: int = 100) -> list[dict[str, Any]]:
-        """The newest posts in ``subreddit`` (at most 100 per call)."""
-        response = self._http.get(
-            f"{API_BASE}/r/{subreddit}/new",
-            params={"limit": min(limit, 100), "raw_json": 1},
-            headers={"Authorization": f"Bearer {self._access_token()}"},
-        )
-        response.raise_for_status()
-        children = response.json()["data"]["children"]
-        return [child["data"] for child in children]
+    def _throttle(self) -> None:
+        now = self._clock()
+        if self._remaining is not None and self._remaining <= 1 and now < self._reset_at:
+            self._sleep(self._reset_at - now)
+            self._remaining = None
+        now = self._clock()
+        while self._window and now - self._window[0] >= 60.0:
+            self._window.popleft()
+        if len(self._window) >= self._max_per_minute:
+            self._sleep(self._window[0] + 60.0 - now)
+            now = self._clock()
+            while self._window and now - self._window[0] >= 60.0:
+                self._window.popleft()
+        self._window.append(self._clock())
+
+    def _note_limits(self, response: httpx.Response) -> None:
+        remaining = _float_header(response, "X-Ratelimit-Remaining")
+        reset = _float_header(response, "X-Ratelimit-Reset")
+        if remaining is not None:
+            self._remaining = remaining
+        if reset is not None:
+            self._reset_at = self._clock() + reset
+
+    def _get(self, path: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        reauthenticated = False
+        attempt = 0
+        while True:
+            self._throttle()
+            self.api_calls += 1
+            try:
+                response = self._http.get(
+                    f"{API_BASE}{path}",
+                    params=dict(params),
+                    headers={"Authorization": f"Bearer {self._access_token()}"},
+                )
+            except httpx.TransportError:
+                if attempt >= self._max_retries:
+                    raise
+                self._sleep(self._backoff * 2**attempt)
+                attempt += 1
+                continue
+            self._note_limits(response)
+            if response.status_code == 401 and not reauthenticated:
+                reauthenticated = True
+                self._token = None
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt >= self._max_retries:
+                    raise RedditAPIError(
+                        f"{path} still returning {response.status_code} after "
+                        f"{self._max_retries} retries"
+                    )
+                wait = self._backoff * 2**attempt
+                if response.status_code == 429:
+                    hinted = _float_header(response, "Retry-After")
+                    if hinted is None:
+                        hinted = _float_header(response, "X-Ratelimit-Reset")
+                    wait = max(wait, hinted or 0.0)
+                self._sleep(wait)
+                attempt += 1
+                continue
+            response.raise_for_status()
+            return dict(response.json())
+
+    def fetch_new(
+        self,
+        subreddit: str,
+        limit: int = 100,
+        *,
+        after: str | None = None,
+        before: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """The newest posts in ``subreddit`` (at most 100 per call).
+
+        ``after``/``before`` are fullnames (``t3_xxxx``) for paging.
+        """
+        params: dict[str, Any] = {"limit": min(limit, 100), "raw_json": 1}
+        if after is not None:
+            params["after"] = _fullname(after)
+        if before is not None:
+            params["before"] = _fullname(before)
+        body = self._get(f"/r/{subreddit}/new", params)
+        return [child["data"] for child in body["data"]["children"]]
+
+    def fetch_info(self, fullnames: Sequence[str]) -> list[dict[str, Any]]:
+        """Current state of posts by id or ``t3_`` fullname, 100 per request."""
+        names = [_fullname(name) for name in fullnames]
+        posts: list[dict[str, Any]] = []
+        for start in range(0, len(names), 100):
+            batch = names[start : start + 100]
+            body = self._get("/api/info", {"id": ",".join(batch), "raw_json": 1})
+            posts.extend(child["data"] for child in body["data"]["children"])
+        return posts
 
 
 def posts_to_frame(

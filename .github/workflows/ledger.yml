@@ -1,0 +1,72 @@
+name: Ledger
+
+# Records each price-only signal's prediction after the US close, scores the
+# predictions whose holding period has ended, and commits records/ so the git
+# history timestamps every entry. Prices come from yfinance; a failed download
+# fails the job. There is no fallback data.
+
+on:
+  schedule:
+    # 21:30 UTC on weekdays is after the 16:00 New York close in both EST and EDT.
+    # On a weekday holiday the last session is already recorded and nothing changes.
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ledger
+  cancel-in-progress: false
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-extras --frozen
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Record predictions
+        run: |
+          uv run sigaudit ledger record --signal momentum --universe universes/us_sector_etfs.txt
+          uv run sigaudit ledger record --signal random --universe universes/us_sector_etfs.txt
+
+      - name: Verify ledger
+        run: uv run sigaudit ledger verify
+
+      # Commit predictions before scoring, so a scoring failure cannot delay
+      # their timestamp.
+      - name: Commit predictions
+        run: |
+          if [ -n "$(git status --porcelain -- records)" ]; then
+            git add records
+            git commit -m "Ledger: record $(TZ=America/New_York date +%Y-%m-%d)"
+            git pull --rebase
+            git push
+          else
+            echo "No new predictions to commit."
+          fi
+
+      - name: Score finished holding periods
+        run: uv run sigaudit ledger score
+
+      - name: Verify ledger and outcomes
+        run: uv run sigaudit ledger verify
+
+      - name: Commit outcomes
+        run: |
+          if [ -n "$(git status --porcelain -- records)" ]; then
+            git add records
+            git commit -m "Ledger: score $(TZ=America/New_York date +%Y-%m-%d)"
+            git pull --rebase
+            git push
+          else
+            echo "No new outcomes to commit."
+          fi
